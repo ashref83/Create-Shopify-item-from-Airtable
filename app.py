@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from your_file_name import generate_description_from_web  # replace with your filename (without .py extension)
+from description_agent.py import generate_description_from_web  # replace with your filename (without .py extension)
 
 app = Flask(__name__)
 
