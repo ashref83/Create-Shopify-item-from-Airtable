@@ -54,6 +54,56 @@ def shopify_graphql(query, variables=None):
     resp.raise_for_status()
     return resp.json()
 
+# ---------- Markets / Price Lists ----------
+def get_market_price_lists():
+    global CACHED_PRICE_LISTS
+    if CACHED_PRICE_LISTS is not None:
+        print("Using cached price lists.", flush=True)
+        return CACHED_PRICE_LISTS
+
+    MARKET_QUERY = """
+    query ($first: Int!) {
+      markets(first: $first) {
+        nodes {
+          id
+          name
+          catalogs(first: 10) {
+            nodes {
+              id
+              priceList {
+                id
+                name
+                currency
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    result = shopify_graphql(MARKET_QUERY, {"first": 20})
+    if "data" not in result or "markets" not in result["data"]:
+        print("ERROR: Could not find data.markets in result", flush=True)
+        print("Raw result:", result, flush=True)
+        return {}
+
+    price_lists = {}
+    print("\nDEBUG: --- Shopify Market Catalogs/PriceLists ---", flush=True)
+    for market in result["data"]["markets"]["nodes"]:
+        mname = market["name"]
+        for catalog in market["catalogs"]["nodes"]:
+            pl = catalog.get("priceList")
+            print(f"  Market: {mname} | Catalog: {catalog.get('id')}", flush=True)
+            if pl:
+                print(f"    PriceList: {pl['name']} (ID: {pl['id']}, Currency: {pl['currency']})", flush=True)
+                price_lists[mname] = {"id": pl["id"], "currency": pl["currency"]}
+            else:
+                print("    No price list attached.", flush=True)
+
+    CACHED_PRICE_LISTS = price_lists
+    print("DEBUG: price_lists mapping used for updates:", price_lists, flush=True)
+    return price_lists
+
 
 def get_variant_product_and_inventory_by_sku(sku):
     GET_VARIANT_QUERY = """
