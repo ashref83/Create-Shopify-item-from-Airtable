@@ -1,0 +1,206 @@
+import os
+import requests
+
+SHOP = os.environ["SHOPIFY_SHOP"]
+TOKEN = os.environ["SHOPIFY_API_TOKEN"]
+API_VERSION = os.getenv("SHOPIFY_API_VERSION", "2024-07")
+PREFERRED_LOCATION_ID = os.getenv("SHOPIFY_LOCATION_ID")
+
+MARKET_NAMES = {
+    "UAE": "United Arab Emirates",
+    "Asia": "Asia Market",
+    "America": "America & Australia Market",
+}
+
+CACHED_PRICE_LISTS = None
+CACHED_PRIMARY_LOCATION_ID = None
+
+
+def _json_headers():
+    return {"X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json"}
+
+
+def _graphql_url():
+    return f"https://{SHOP}/admin/api/{API_VERSION}/graphql.json"
+
+
+def _rest_url(path: str):
+    return f"https://{SHOP}/admin/api/{API_VERSION}/{path}"
+
+
+def _to_number(x):
+    if x is None:
+        return None
+    if isinstance(x, (int, float)):
+        return x
+    s = str(x).strip()
+    if not s:
+        return None
+    try:
+        return float(s) if "." in s else int(s)
+    except Exception:
+        return None
+
+
+def shopify_graphql(query, variables=None):
+    url = _graphql_url()
+    payload = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    print(f"[GQL] POST {url} Vars: {variables}", flush=True)
+    resp = requests.post(url, headers=_json_headers(), json=payload)
+    print("[GQL] Status:", resp.status_code, flush=True)
+    print("[GQL] Body:", resp.text, flush=True)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_variant_product_and_inventory_by_sku(sku):
+    GET_VARIANT_QUERY = """
+    query ($sku: String!) {
+      productVariants(first: 1, query: $sku) {
+        nodes { id sku product { id } }
+      }
+    }
+    """
+    res = shopify_graphql(GET_VARIANT_QUERY, {"sku": sku})
+    nodes = res.get("data", {}).get("productVariants", {}).get("nodes", [])
+    if not nodes:
+        print("No variant found for SKU:", sku, flush=True)
+        return None, None, None, None
+
+    variant_gid = nodes[0]["id"]
+    product_gid = nodes[0]["product"]["id"]
+    variant_num = variant_gid.split("/")[-1]
+
+    # REST fetch inventory item
+    url = _rest_url(f"variants/{variant_num}.json")
+    r = requests.get(url, headers=_json_headers())
+    print("[REST] GET variant:", r.status_code, r.text, flush=True)
+    r.raise_for_status()
+    inventory_item_id = r.json()["variant"]["inventory_item_id"]
+    return variant_gid, product_gid, variant_num, inventory_item_id
+
+
+def update_variant_default_price(variant_id_num, price, compare_at_price=None):
+    url = _rest_url(f"variants/{variant_id_num}.json")
+    variant_data = {"id": int(variant_id_num), "price": str(price)}
+    if compare_at_price is not None:
+        variant_data["compare_at_price"] = str(compare_at_price)
+    payload = {"variant": variant_data}
+    print(f"[REST] PUT default price {url} payload={payload}", flush=True)
+    resp = requests.put(url, headers=_json_headers(), json=payload)
+    print("[REST] default price resp:", resp.status_code, resp.text, flush=True)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def update_variant_details(variant_gid, title=None, barcode=None):
+    if not (title or barcode):
+        return None
+    var_num = variant_gid.split("/")[-1]
+    url = _rest_url(f"variants/{var_num}.json")
+    vdata = {"id": int(var_num)}
+    if title:
+        vdata["title"] = title
+    if barcode:
+        vdata["barcode"] = barcode
+    payload = {"variant": vdata}
+    resp = requests.put(url, headers=_json_headers(), json=payload)
+    print("[REST] variant details resp:", resp.status_code, resp.text, flush=True)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def update_product_title(product_gid, new_title):
+    pid = product_gid.split("/")[-1]
+    url = _rest_url(f"products/{pid}.json")
+    payload = {"product": {"id": int(pid), "title": new_title}}
+    resp = requests.put(url, headers=_json_headers(), json=payload)
+    print("[REST] product title resp:", resp.status_code, resp.text, flush=True)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def set_metafield(owner_id_gid, namespace, key, mtype, value):
+    MUT = """
+    mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields { id namespace key type value }
+        userErrors { field message }
+      }
+    }
+    """
+    variables = {
+        "metafields": [{
+            "ownerId": owner_id_gid,
+            "namespace": namespace,
+            "key": key,
+            "type": mtype,
+            "value": str(value)
+        }]
+    }
+    res = shopify_graphql(MUT, variables)
+    return res
+
+
+def get_primary_location_id():
+    global CACHED_PRIMARY_LOCATION_ID
+    if PREFERRED_LOCATION_ID:
+        return PREFERRED_LOCATION_ID
+    if CACHED_PRIMARY_LOCATION_ID:
+        return CACHED_PRIMARY_LOCATION_ID
+
+    url = _rest_url("locations.json")
+    r = requests.get(url, headers=_json_headers())
+    r.raise_for_status()
+    locs = r.json().get("locations", [])
+    primary = next((l for l in locs if l.get("primary")), None)
+    chosen = primary or locs[0]
+    CACHED_PRIMARY_LOCATION_ID = str(chosen["id"])
+    return CACHED_PRIMARY_LOCATION_ID
+
+
+def set_inventory_absolute(inventory_item_id, location_id, quantity):
+    url = _rest_url("inventory_levels/set.json")
+    payload = {
+        "inventory_item_id": int(inventory_item_id),
+        "location_id": int(location_id),
+        "available": int(quantity)
+    }
+    resp = requests.post(url, headers=_json_headers(), json=payload)
+    print("[REST] inventory set resp:", resp.status_code, resp.text, flush=True)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def update_price_list(price_list_id, variant_gid, price_amount, currency, compare_at_amount=None):
+    MUT = """
+    mutation priceListFixedPricesUpdate(
+      $priceListId: ID!,
+      $pricesToAdd: [PriceListPriceInput!]!,
+      $variantIdsToDelete: [ID!]!
+    ) {
+      priceListFixedPricesUpdate(
+        priceListId: $priceListId,
+        pricesToAdd: $pricesToAdd,
+        variantIdsToDelete: $variantIdsToDelete
+      ) {
+        userErrors { field message }
+      }
+    }
+    """
+    price_input = {
+        "variantId": variant_gid,
+        "price": {"amount": str(price_amount), "currencyCode": currency}
+    }
+    if compare_at_amount is not None:
+        price_input["compareAtPrice"] = {"amount": str(compare_at_amount), "currencyCode": currency}
+
+    variables = {
+        "priceListId": price_list_id,
+        "pricesToAdd": [price_input],
+        "variantIdsToDelete": []
+    }
+    res = shopify_graphql(MUT, variables)
+    return res
