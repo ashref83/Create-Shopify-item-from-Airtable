@@ -4,3 +4,4 @@ requests
 pandas
 python-dotenv
 tenacity
+airtable-python-wrapper
