@@ -270,7 +270,7 @@ def get_catalog_price_lists():
       catalogs(first: 10) {
         nodes {
           id
-          name
+          handle
           priceList {
             id
             name
@@ -290,7 +290,7 @@ def get_catalog_price_lists():
 
     price_lists = {}
     for cat in catalogs:
-        cname = (cat.get("name") or "").strip()
+        cname = (cat.get("handle") or "").strip()
         pl = cat.get("priceList")
         if not pl:
             continue
