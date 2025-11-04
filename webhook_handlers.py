@@ -242,4 +242,4 @@ def handle_airtable_webhook():
         print("ERROR:", str(e), flush=True)
         print(traceback.format_exc(), flush=True)
         print("=" * 80, flush=True)
-        return jsonify({"error": str(e)}), 500``
+        return jsonify({"error": str(e)}), 500
