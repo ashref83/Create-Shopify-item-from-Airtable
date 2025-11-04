@@ -166,7 +166,7 @@ def handle_airtable_webhook():
         else:
             print("⊘ Skipping inventory update - qty_abs is None", flush=True)
 
-        # ---- STEP 6: Update regional market prices ----
+        # ---- STEP 6: Update regional market prices (direct args, no $input) ----
         print("\n" + "=" * 80, flush=True)
         print("STEP 6: UPDATING MARKET PRICES", flush=True)
         print("=" * 80, flush=True)
@@ -191,53 +191,45 @@ def handle_airtable_webhook():
             compare_amt = uae_compare_price if key == "UAE" else None
 
             mutation = """
-            mutation priceListFixedPricesAdd($input: PriceListFixedPricesAddInput!) {
-            priceListFixedPricesAdd(input: $input) {
+            mutation priceListFixedPricesAdd($priceListId: ID!, $prices: [PriceListPriceInput!]!) {
+              priceListFixedPricesAdd(priceListId: $priceListId, prices: $prices) {
+                prices {
+                  price { amount currencyCode }
+                  compareAtPrice { amount currencyCode }
+                  variant { id }
+                }
                 userErrors {
-                field
-                message
+                  field
+                  code
+                  message
                 }
-                priceList {
-                id
-                name
-                }
-                fixedPrices {
-                price {
-                    amount
-                    currencyCode
-                }
-                variant {
-                    id
-                }
-                }
-            }
+              }
             }
             """
 
-            variables = {
-                "input": {
-                    "priceListId": price_list_id,
-                    "fixedPrices": [
-                        {
-                            "variantId": variant_gid,
-                            "price": {
-                                "amount": str(amount),
-                                "currencyCode": currency,
-                            },
-                            "compareAtPrice": {
-                                "amount": str(compare_amt) if compare_amt else None,
-                                "currencyCode": currency,
-                            },
-                        }
-                    ],
+            # Build one price input, append compare only if present
+            price_input = {
+                "variantId": variant_gid,
+                "price": {
+                    "amount": str(amount),
+                    "currencyCode": currency,
                 }
+            }
+            if compare_amt:
+                price_input["compareAtPrice"] = {
+                    "amount": str(compare_amt),
+                    "currencyCode": currency,
+                }
+
+            variables = {
+                "priceListId": price_list_id,
+                "prices": [price_input]
             }
 
             print(f"→ Updating {key} | PL={price_list_id} | Price={amount} {currency}", flush=True)
             res = shopify_graphql(mutation, variables)
             price_updates[key] = res
             print("✓ Price update result:", res, flush=True)
-
 
         # ---- Final Response ----
         print("\n" + "=" * 80, flush=True)
