@@ -191,41 +191,53 @@ def handle_airtable_webhook():
             compare_amt = uae_compare_price if key == "UAE" else None
 
             mutation = """
-            mutation priceListFixedPricesAdd(
-              $priceListId: ID!,
-              $prices: [PriceListFixedPriceInput!]!
-            ) {
-              priceListFixedPricesAdd(priceListId: $priceListId, prices: $prices) {
-                prices {
-                  price { amount currencyCode }
-                  variant { id }
+            mutation priceListFixedPricesAdd($input: PriceListFixedPricesAddInput!) {
+            priceListFixedPricesAdd(input: $input) {
+                userErrors {
+                field
+                message
                 }
-                userErrors { field message }
-              }
+                priceList {
+                id
+                name
+                }
+                fixedPrices {
+                price {
+                    amount
+                    currencyCode
+                }
+                variant {
+                    id
+                }
+                }
+            }
             }
             """
 
             variables = {
-                "priceListId": price_list_id,
-                "prices": [
-                    {
-                        "variantId": variant_gid,
-                        "price": {
-                            "amount": str(amount),
-                            "currencyCode": currency,
-                        },
-                        "compareAtPrice": {
-                            "amount": str(compare_amt) if compare_amt else None,
-                            "currencyCode": currency,
-                        },
-                    }
-                ],
+                "input": {
+                    "priceListId": price_list_id,
+                    "fixedPrices": [
+                        {
+                            "variantId": variant_gid,
+                            "price": {
+                                "amount": str(amount),
+                                "currencyCode": currency,
+                            },
+                            "compareAtPrice": {
+                                "amount": str(compare_amt) if compare_amt else None,
+                                "currencyCode": currency,
+                            },
+                        }
+                    ],
+                }
             }
 
             print(f"→ Updating {key} | PL={price_list_id} | Price={amount} {currency}", flush=True)
             res = shopify_graphql(mutation, variables)
             price_updates[key] = res
             print("✓ Price update result:", res, flush=True)
+
 
         # ---- Final Response ----
         print("\n" + "=" * 80, flush=True)
