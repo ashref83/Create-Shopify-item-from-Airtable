@@ -303,3 +303,75 @@ def get_catalog_price_lists():
     print("✅ Final catalog → priceList mapping:", price_lists, flush=True)
     CACHED_PRICE_LISTS = price_lists
     return price_lists
+
+def update_price_list_fixed(variant_gid, prices, compare_at_price=None):
+    """
+    Updates fixed prices for the given variant across your known markets.
+    Uses Shopify's priceListFixedPricesAdd mutation.
+    """
+    print("================================================================================")
+    print("STEP 6: UPDATING MARKET PRICES")
+    print("================================================================================")
+
+    # ✅ Direct mapping to your known price list IDs
+    PRICE_LIST_IDS = {
+        "UAE": "gid://shopify/PriceList/31168201019",       # United Arab Emirates
+        "Asia": "gid://shopify/PriceList/31168266555",      # Asia Market with 55 rate
+        "America": "gid://shopify/PriceList/31168233787",   # America catalog
+    }
+
+    for market, price_info in prices.items():
+        amount = price_info.get("amount")
+        currency = price_info.get("currency")
+        if not amount or not currency:
+            print(f"⊘ Missing price data for {market}, skipping...", flush=True)
+            continue
+
+        price_list_id = PRICE_LIST_IDS.get(market)
+        if not price_list_id:
+            print(f"⊘ No price list ID configured for {market}, skipping...", flush=True)
+            continue
+
+        mutation = """
+        mutation priceListFixedPricesAdd(
+          $priceListId: ID!,
+          $prices: [PriceListFixedPriceInput!]!
+        ) {
+          priceListFixedPricesAdd(priceListId: $priceListId, prices: $prices) {
+            prices {
+              price {
+                amount
+                currencyCode
+              }
+              variant {
+                id
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+        """
+
+        variables = {
+            "priceListId": price_list_id,
+            "prices": [
+                {
+                    "variantId": variant_gid,
+                    "price": {
+                        "amount": str(amount),
+                        "currencyCode": currency,
+                    },
+                    "compareAtPrice": {
+                        "amount": str(compare_at_price) if compare_at_price else None,
+                        "currencyCode": currency,
+                    },
+                }
+            ],
+        }
+
+        print(f"→ Updating {market} | PL={price_list_id} | Price={amount} {currency}", flush=True)
+        res = shopify_graphql(mutation, variables)
+        print("✓ Price update result:", res, flush=True)
