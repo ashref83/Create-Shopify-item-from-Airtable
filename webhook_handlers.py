@@ -65,6 +65,11 @@ def handle_airtable_webhook():
             flush=True
         )
 
+        # ---- CRITICAL: Validate inventory_item_id ----
+        if not inventory_item_id:
+            print("ERROR: inventory_item_id is None or empty!", flush=True)
+            return jsonify({"error": "Inventory item ID not found for variant"}), 500
+
         # ---- Variant + Product fields ----
         if title or barcode:
             update_variant_details(variant_gid, title=title, barcode=barcode)
@@ -87,9 +92,38 @@ def handle_airtable_webhook():
 
         # ---- Inventory (absolute set at primary location) ----
         inventory_update = None
+        inventory_error = None
+        
         if qty_abs is not None:
-            loc_id = get_primary_location_id()
-            inventory_update = set_inventory_absolute(inventory_item_id, loc_id, qty_abs)
+            print(f"Attempting to update inventory to {qty_abs}...", flush=True)
+            
+            try:
+                loc_id = get_primary_location_id()
+                print(f"Primary location ID: {loc_id}", flush=True)
+                
+                if not loc_id:
+                    inventory_error = "Primary location ID not found"
+                    print(f"ERROR: {inventory_error}", flush=True)
+                else:
+                    inventory_update = set_inventory_absolute(inventory_item_id, loc_id, qty_abs)
+                    print(f"Inventory update result: {inventory_update}", flush=True)
+                    
+                    # Check if the update was successful
+                    if inventory_update and isinstance(inventory_update, dict):
+                        if inventory_update.get("error"):
+                            inventory_error = inventory_update.get("error")
+                            print(f"ERROR: Inventory update failed - {inventory_error}", flush=True)
+                        else:
+                            print(f"SUCCESS: Inventory updated to {qty_abs}", flush=True)
+                    elif inventory_update is None:
+                        inventory_error = "Inventory update returned None"
+                        print(f"ERROR: {inventory_error}", flush=True)
+                        
+            except Exception as inv_err:
+                inventory_error = str(inv_err)
+                print(f"ERROR during inventory update: {inventory_error}", flush=True)
+                import traceback
+                print(traceback.format_exc(), flush=True)
 
         # ---- Markets / Price Lists ----
         price_lists = get_market_price_lists()
@@ -120,13 +154,20 @@ def handle_airtable_webhook():
             price_updates[market_key] = res
 
         # ---- Response ----
-        return jsonify({
+        response_data = {
             "status": "success",
             "variant_id": variant_gid,
             "product_id": product_gid,
             "inventory_update": inventory_update,
             "price_list_updates": price_updates
-        }), 200
+        }
+        
+        # Add warning if inventory update failed
+        if inventory_error:
+            response_data["inventory_error"] = inventory_error
+            response_data["status"] = "partial_success"
+        
+        return jsonify(response_data), 200
 
     except Exception as e:
         import traceback
