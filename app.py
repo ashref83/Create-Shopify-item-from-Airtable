@@ -2,6 +2,7 @@ from flask import Flask
 from description_agent import generate_description_from_web
 from webhook_handlers import handle_airtable_webhook
 from create_shopify_item import create_shopify_bp
+import logging
 
 # ✅ Initialize Flask app first
 app = Flask(__name__)
@@ -33,4 +34,7 @@ def home():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    logging.basicConfig(level=logging.INFO)
+    app.logger.setLevel(logging.INFO)
+
+    app.run(host="0.0.0.0", port=8080, debug=True)
