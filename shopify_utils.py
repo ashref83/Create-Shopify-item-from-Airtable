@@ -254,3 +254,52 @@ def update_price_list(price_list_id, variant_gid, price_amount, currency, compar
     }
     res = shopify_graphql(MUT, variables)
     return res
+
+def get_catalog_price_lists():
+    """
+    Fetch all catalogs directly (bypassing markets)
+    and map by catalog name.
+    """
+    global CACHED_PRICE_LISTS
+    if CACHED_PRICE_LISTS is not None:
+        print("Using cached catalog price lists.", flush=True)
+        return CACHED_PRICE_LISTS
+
+    CATALOG_QUERY = """
+    query {
+      catalogs(first: 10) {
+        nodes {
+          id
+          name
+          priceList {
+            id
+            name
+            currency
+          }
+        }
+      }
+    }
+    """
+
+    print("Fetching catalogs & price lists...", flush=True)
+    result = shopify_graphql(CATALOG_QUERY)
+    catalogs = result.get("data", {}).get("catalogs", {}).get("nodes", [])
+    if not catalogs:
+        print("⚠️ No catalogs returned from Shopify GraphQL", flush=True)
+        return {}
+
+    price_lists = {}
+    for cat in catalogs:
+        cname = (cat.get("name") or "").strip()
+        pl = cat.get("priceList")
+        if not pl:
+            continue
+        pl_id = pl["id"]
+        currency = pl["currency"]
+
+        price_lists[cname] = {"id": pl_id, "currency": currency}
+        print(f"✅ Catalog '{cname}' → PriceList {pl_id} ({currency})", flush=True)
+
+    print("✅ Final catalog → priceList mapping:", price_lists, flush=True)
+    CACHED_PRICE_LISTS = price_lists
+    return price_lists

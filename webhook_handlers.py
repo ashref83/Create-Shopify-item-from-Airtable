@@ -1,5 +1,6 @@
 from flask import jsonify, request
 import os
+from shopify_utils import get_catalog_price_lists
 
 from shopify_utils import (
     _to_number, MARKET_NAMES,
@@ -179,34 +180,32 @@ def handle_airtable_webhook():
         print("STEP 6: UPDATING MARKET PRICES", flush=True)
         print("=" * 80, flush=True)
         
-        price_lists = get_market_price_lists()
+        price_lists = get_catalog_price_lists()
         print("Price lists:", price_lists, flush=True)
 
         price_updates = {}
-        for market_key, amount in prices.items():
+        catalog_map = {
+            "UAE": "United Arab Emirates",
+            "Asia": "Asia Market with 55 rate",
+            "America": "America catalog",
+        }
+
+        for key, amount in prices.items():
             if amount is None:
                 continue
 
-            mname = MARKET_NAMES.get(market_key)
-            if not mname or mname not in price_lists:
-                print(f"⊘ No price list for market {market_key}", flush=True)
+            catalog_name = catalog_map.get(key)
+            pl = price_lists.get(catalog_name)
+            if not pl:
+                print(f"⊘ Catalog not found for {catalog_name}", flush=True)
                 continue
 
-            pl = price_lists[mname]
-            compare_amt = uae_compare_price if (market_key == "UAE" and uae_compare_price is not None) else None
+            compare_amt = uae_compare_price if key == "UAE" else None
+            print(f"→ Updating {catalog_name} | PL={pl['id']} | Price={amount} {pl['currency']}", flush=True)
 
-            print(
-                f"→ Updating PL={pl['id']} Market={market_key} "
-                f"price={amount} {pl['currency']} compare_at={compare_amt}",
-                flush=True
-            )
-
-            res = update_price_list(
-                pl["id"], variant_gid, amount, pl["currency"], compare_at_amount=compare_amt
-            )
-            price_updates[market_key] = res
-            print(f"✓ Price update result: {res}", flush=True)
-
+            res = update_price_list(pl["id"], variant_gid, amount, pl["currency"], compare_at_amount=compare_amt)
+            price_updates[key] = res
+       
         # ---- Response ----
         print("\n" + "=" * 80, flush=True)
         print("FINAL RESPONSE", flush=True)
