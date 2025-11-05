@@ -162,7 +162,7 @@ def handle_airtable_webhook():
                 continue
 
             compare_val = compare_prices.get(region)
-            currency = "AED" if region == "UAE" else "USD"
+            currency = "AED" if region == "UAE" else "AED"
 
             mutation = """
             mutation priceListFixedPricesAdd($priceListId: ID!, $prices: [PriceListPriceInput!]!) {
