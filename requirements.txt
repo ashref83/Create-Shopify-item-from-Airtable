@@ -5,3 +5,4 @@ pandas
 python-dotenv
 tenacity
 airtable-python-wrapper
+shopifyapi>=12.3.0
