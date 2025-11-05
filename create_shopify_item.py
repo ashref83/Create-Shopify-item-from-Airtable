@@ -147,15 +147,21 @@ def create_shopify_item():
         product_gid = f"gid://shopify/Product/{shopify_product_id}"
         variant_gid = f"gid://shopify/ProductVariant/{variant_id}"
 
-        # Product metafields
+        # 🧩 Product metafields
         set_metafield(product_gid, "custom", "size", "single_line_text_field", record.get("Size", ""))
         set_metafield(product_gid, "custom", "brands", "single_line_text_field", record.get("Brand", ""))
 
-        # ✅ Corrected Google metafields (use google_shopping namespace)
+        # 🧠 Normalize gender value (Google expects: male, female, unisex)
+        raw_gender = (record.get("Category") or "").strip().lower()
+        valid_genders = ["male", "female", "unisex"]
+        gender_value = raw_gender if raw_gender in valid_genders else "unisex"
+
+        # ✅ Google Shopping metafields
         set_metafield(variant_gid, "google_shopping", "age_group", "single_line_text_field", "adult")
-        set_metafield(variant_gid, "google_shopping", "gender", "single_line_text_field", record.get("Category", "").lower())
         set_metafield(variant_gid, "google_shopping", "condition", "single_line_text_field", "new")
+        set_metafield(variant_gid, "google_shopping", "gender", "single_line_text_field", gender_value)
         set_metafield(variant_gid, "google_shopping", "mpn", "single_line_text_field", record.get("SKU", ""))
+
 
         # ---------------- 5️⃣ Update Airtable ----------------
         try:
