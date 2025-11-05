@@ -151,9 +151,11 @@ def create_shopify_item():
         set_metafield(product_gid, "custom", "size", "single_line_text_field", record.get("Size", ""))
         set_metafield(product_gid, "custom", "brands", "single_line_text_field", record.get("Brand", ""))
 
-        # Variant metafields
-        set_metafield(variant_gid, "google", "age_group", "single_line_text_field", "Adults")
-        set_metafield(variant_gid, "google", "gender", "single_line_text_field", record.get("Category", ""))
+        # ✅ Corrected Google metafields (use google_shopping namespace)
+        set_metafield(variant_gid, "google_shopping", "age_group", "single_line_text_field", "adult")
+        set_metafield(variant_gid, "google_shopping", "gender", "single_line_text_field", record.get("Category", "").lower())
+        set_metafield(variant_gid, "google_shopping", "condition", "single_line_text_field", "new")
+        set_metafield(variant_gid, "google_shopping", "mpn", "single_line_text_field", record.get("SKU", ""))
 
         # ---------------- 5️⃣ Update Airtable ----------------
         try:
