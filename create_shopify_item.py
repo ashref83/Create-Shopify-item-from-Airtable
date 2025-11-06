@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify
 from airtable import Airtable
 import shopify
 from typing import List, Dict, Optional
+from shopify_utils import _to_number, shopify_graphql  # 🆕 for price updates
 
 create_shopify_bp = Blueprint("create_shopify_bp", __name__)
 
@@ -36,8 +37,8 @@ def setup_shopify_session():
     try:
         if not all([SHOP, TOKEN]):
             raise Exception("Shopify credentials not configured")
-        
-        # These are required for the library but not used when using access token
+
+        # Proper session setup
         shopify.Session.setup(api_key="dummy", secret="dummy")
         session = shopify.Session(f"https://{SHOP}", API_VERSION, TOKEN)
         shopify.ShopifyResource.activate_session(session)
@@ -46,12 +47,14 @@ def setup_shopify_session():
         print(f"⚠️ Shopify session setup failed: {e}")
         return False
 
+
 def clear_shopify_session():
     """Clear Shopify session"""
     try:
         shopify.ShopifyResource.clear_session()
     except Exception as e:
         print(f"⚠️ Error clearing Shopify session: {e}")
+
 
 # ---------------------------
 # ENVIRONMENT VALIDATION
@@ -64,12 +67,13 @@ def validate_environment():
         "AIRTABLE_BASE_ID": AIRTABLE_BASE_ID,
         "AIRTABLE_API_KEY": AIRTABLE_API_KEY
     }
-    
+
     missing = [var for var, value in required_vars.items() if not value]
     if missing:
         raise Exception(f"Missing environment variables: {', '.join(missing)}")
-    
+
     return True
+
 
 # ---------------------------
 # IMAGE SEARCHER CLASS
@@ -89,7 +93,6 @@ class ImageSearcher:
             return {"success": False, "error": "Empty product name", "images": []}
 
         try:
-            # Setup fresh session for this request
             if not setup_shopify_session():
                 return {"success": False, "error": "Failed to setup Shopify session", "images": []}
 
@@ -102,58 +105,55 @@ class ImageSearcher:
             after_param = f', after: "{cursor}"' if cursor else ""
             query = f"""
             query {{
-            files(first: {limit}{after_param}, query: "filename:{search_pattern} AND media_type:IMAGE") {{
+              files(first: {limit}{after_param}, query: "filename:{search_pattern} AND media_type:IMAGE") {{
                 edges {{
-                node {{
+                  node {{
                     ... on MediaImage {{
-                    id
-                    alt
-                    createdAt
-                    updatedAt
-                    image {{
+                      id
+                      alt
+                      createdAt
+                      updatedAt
+                      image {{
                         id
                         url
                         width
                         height
+                      }}
                     }}
-                    }}
-                }}
+                  }}
                 }}
                 pageInfo {{
-                hasNextPage
-                endCursor
+                  hasNextPage
+                  endCursor
                 }}
-            }}
+              }}
             }}
             """
 
             gql = shopify.GraphQL()
             result = gql.execute(query)
-            
-            # FIX: Parse the result if it's a string
+
             if isinstance(result, str):
                 import json
                 result = json.loads(result)
-            
-            # Check for GraphQL errors
+
             if "errors" in result:
-                error_msg = result["errors"][0]["message"] if isinstance(result["errors"], list) else str(result["errors"])
-                print(f"⚠️ GraphQL error: {error_msg}", flush=True)
-                return {"success": False, "error": error_msg, "images": []}
-                
+                err_msg = result["errors"][0]["message"] if isinstance(result["errors"], list) else str(result["errors"])
+                print(f"⚠️ GraphQL error: {err_msg}", flush=True)
+                return {"success": False, "error": err_msg, "images": []}
+
             data = result.get("data", {}).get("files", {})
             images = [edge["node"] for edge in data.get("edges", []) if edge.get("node")]
-            
             print(f"✅ Found {len(images)} images for: {product_name}", flush=True)
+
             return {"success": True, "images": images, "count": len(images)}
-            
+
         except Exception as e:
             print(f"⚠️ Image search error: {e}", flush=True)
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e), "images": []}
         finally:
-            # Always clear session
             clear_shopify_session()
 
 
@@ -163,20 +163,14 @@ class ImageSearcher:
 def _json_headers():
     return {"Content-Type": "application/json", "X-Shopify-Access-Token": TOKEN}
 
+
 def _rest_url(path: str):
     return f"https://{SHOP}/admin/api/{API_VERSION}/{path}"
+
 
 def _graphql_url():
     return f"https://{SHOP}/admin/api/{API_VERSION}/graphql.json"
 
-def _to_number(x):
-    """Safely convert to number"""
-    try:
-        if x is None or str(x).strip() == "":
-            return 0
-        return float(x)
-    except Exception:
-        return 0
 
 def get_linked_image_urls_from_name_field(linked_record_ids, linked_table_name="Image URLs"):
     """Fetch 'Name' field values (the image URLs) from linked records."""
@@ -203,23 +197,15 @@ def get_linked_image_urls_from_name_field(linked_record_ids, linked_table_name="
 
     return urls
 
+
 def set_metafield(owner_id, namespace, key, mtype, value):
     """Generic helper to set a metafield via GraphQL."""
     try:
         mutation = """
         mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
           metafieldsSet(metafields: $metafields) {
-            metafields { 
-                id
-                namespace 
-                key 
-                type 
-                value 
-            }
-            userErrors { 
-                field 
-                message 
-            }
+            metafields { id namespace key type value }
+            userErrors { field message }
           }
         }
         """
@@ -232,73 +218,40 @@ def set_metafield(owner_id, namespace, key, mtype, value):
                 "value": str(value)
             }]
         }
-        
-        resp = requests.post(
-            _graphql_url(), 
-            headers=_json_headers(), 
-            json={"query": mutation, "variables": variables},
-            timeout=30
-        )
-        resp.raise_for_status()
-        
+
+        resp = requests.post(_graphql_url(), headers=_json_headers(), json={"query": mutation, "variables": variables})
         result = resp.json()
-        if "errors" in result:
-            print(f"⚠️ Metafield GraphQL errors: {result['errors']}", flush=True)
-            return False
-            
-        user_errors = result.get("data", {}).get("metafieldsSet", {}).get("userErrors", [])
-        if user_errors:
-            print(f"⚠️ Metafield user errors: {user_errors}", flush=True)
-            return False
-            
-        print(f"✅ Metafield set: {namespace}.{key} = {value}", flush=True)
-        return True
-        
+        print(f"[GQL metafield] {result}", flush=True)
+        return result
     except Exception as e:
         print(f"⚠️ Error setting metafield {namespace}.{key}: {e}", flush=True)
-        return False
+        return None
+
 
 def get_shopify_locations():
     """Get available Shopify locations"""
-    try:
-        resp = requests.get(_rest_url("locations.json"), headers=_json_headers(), timeout=30)
-        resp.raise_for_status()
-        locations = resp.json().get("locations", [])
-        if not locations:
-            raise Exception("No locations found in Shopify store")
-        return locations
-    except Exception as e:
-        print(f"⚠️ Error fetching locations: {e}", flush=True)
-        raise
+    resp = requests.get(_rest_url("locations.json"), headers=_json_headers())
+    resp.raise_for_status()
+    locations = resp.json().get("locations", [])
+    if not locations:
+        raise Exception("No locations found in Shopify store")
+    return locations
+
 
 # ---------------------------
 # MAIN ROUTE
 # ---------------------------
 @create_shopify_bp.route("/create-shopify-item", methods=["POST"])
 def create_shopify_item():
-    """
-    Create a new Shopify product from Airtable record.
-    Uses modern inventory API (two-step: product → inventory level).
-    Includes automatic image search & metafield setup.
-    """
     try:
-        # Validate environment first
         validate_environment()
-        
+
         data = request.get_json(force=True)
         record_id = data.get("record_id")
         record = data.get("fields", {})
 
         if not record_id or not record:
             return jsonify({"error": "Missing record_id or fields"}), 400
-
-        # Validate required fields
-        required_fields = ["Product Name", "SKU"]
-        missing_fields = [field for field in required_fields if not record.get(field)]
-        if missing_fields:
-            return jsonify({
-                "error": f"Missing required fields: {', '.join(missing_fields)}"
-            }), 400
 
         qty = _to_number(record.get("Qty given in shopify", 0))
         status = "active" if qty > 0 else "draft"
@@ -307,15 +260,15 @@ def create_shopify_item():
         product_data = {
             "product": {
                 "title": record.get("Product Name", "").strip(),
-                "body_html": record.get("ShopifyDesc", "") or "",
-                "vendor": record.get("Brand", "") or "",
-                "product_type": record.get("Type", "") or "",
-                "tags": record.get("Category", "") or "",
+                "body_html": record.get("ShopifyDesc", ""),
+                "vendor": record.get("Brand", ""),
+                "product_type": record.get("Type", ""),
+                "tags": record.get("Category", ""),
                 "status": status,
                 "variants": [{
                     "sku": record.get("SKU", ""),
                     "price": str(_to_number(record.get("UAE Price", 0))),
-                    "barcode": record.get("Barcode", "") or "",
+                    "barcode": record.get("Barcode", ""),
                     "weight": _to_number(record.get("Weight", 850)),
                     "weight_unit": "g",
                     "inventory_management": "shopify",
@@ -330,37 +283,24 @@ def create_shopify_item():
         linked_image_records = record.get("Image URLs", [])
         image_urls = get_linked_image_urls_from_name_field(linked_image_records, linked_table_name="Image URLs")
 
-        # If no linked images, try searching by product name
         if not image_urls:
             product_name = record.get("Product Name", "")
-            if product_name:
-                print(f"🔍 Searching images for: {product_name}", flush=True)
-                search_result = ImageSearcher.search_by_product_name(product_name, limit=5)
-                if search_result["success"] and search_result["count"] > 0:
-                    image_urls = [
-                        img["image"]["url"] for img in search_result["images"] 
-                        if img.get("image") and img["image"].get("url")
-                    ]
-                    print(f"✅ Found {len(image_urls)} images via search", flush=True)
-                else:
-                    print(f"❌ No images found via search: {search_result.get('error', 'Unknown error')}", flush=True)
+            print(f"🔍 Searching images for: {product_name}", flush=True)
+            search_result = ImageSearcher.search_by_product_name(product_name, limit=5)
+            if search_result["success"] and search_result["count"] > 0:
+                image_urls = [
+                    img["image"]["url"] for img in search_result["images"]
+                    if img.get("image") and img["image"].get("url")
+                ]
+                print(f"✅ Found {len(image_urls)} images via search", flush=True)
 
-        # Add images to product data
-        for url in image_urls[:10]:  # Limit to 10 images
+        for url in image_urls[:10]:
             product_data["product"]["images"].append({"src": url})
 
         # ---------------- 3️⃣ Create Product ----------------
-        print(f"🛍️ Creating product: {product_data['product']['title']}", flush=True)
-        resp = requests.post(_rest_url("products.json"), headers=_json_headers(), json=product_data, timeout=30)
-        
+        resp = requests.post(_rest_url("products.json"), headers=_json_headers(), json=product_data)
         if resp.status_code != 201:
-            error_text = resp.text
-            print(f"❌ Shopify API error: {resp.status_code} - {error_text}", flush=True)
-            return jsonify({
-                "error": "Shopify API error",
-                "status": resp.status_code,
-                "details": error_text
-            }), resp.status_code
+            return jsonify({"error": "Shopify API error", "details": resp.text}), resp.status_code
 
         result = resp.json()
         product = result.get("product", {})
@@ -369,46 +309,20 @@ def create_shopify_item():
         variant_id = variant.get("id")
         inventory_item_id = variant.get("inventory_item_id")
 
-        if not all([shopify_product_id, variant_id, inventory_item_id]):
-            return jsonify({
-                "error": "Incomplete product creation response",
-                "details": result
-            }), 500
-
-        print(f"✅ Product created: {shopify_product_id}, Variant: {variant_id}", flush=True)
-
-        # ---------------- 4️⃣ Set Inventory ----------------
-        try:
-            locations = get_shopify_locations()
-            location_id = locations[0]["id"]
-            
-            inv_payload = {
-                "location_id": location_id, 
-                "inventory_item_id": inventory_item_id, 
-                "available": int(qty)
-            }
-            inv_resp = requests.post(
-                _rest_url("inventory_levels/set.json"), 
-                headers=_json_headers(), 
-                json=inv_payload,
-                timeout=30
-            )
-            inv_resp.raise_for_status()
-            inv_result = inv_resp.json()
-            print(f"✅ Inventory set: {qty} at location {location_id}", flush=True)
-        except Exception as e:
-            print(f"⚠️ Inventory setting failed: {e}", flush=True)
-            inv_result = {"error": str(e)}
-
-        # ---------------- 5️⃣ Add Metafields ----------------
-        product_gid = f"gid://shopify/Product/{shopify_product_id}"
         variant_gid = f"gid://shopify/ProductVariant/{variant_id}"
+        product_gid = f"gid://shopify/Product/{shopify_product_id}"
 
-        # Product-level metafields
+        print(f"✅ Product created: {shopify_product_id}", flush=True)
+
+        # ---------------- 4️⃣ Inventory ----------------
+        location_id = get_shopify_locations()[0]["id"]
+        inv_payload = {"location_id": location_id, "inventory_item_id": inventory_item_id, "available": int(qty)}
+        inv_resp = requests.post(_rest_url("inventory_levels/set.json"), headers=_json_headers(), json=inv_payload)
+        print(f"✅ Inventory updated: {qty}", flush=True)
+
+        # ---------------- 5️⃣ Metafields ----------------
         set_metafield(product_gid, "custom", "size", "single_line_text_field", record.get("Size", ""))
         set_metafield(product_gid, "custom", "brands", "single_line_text_field", record.get("Brand", ""))
-
-        # Google Shopping metafields
         raw_gender = (record.get("Category") or "").strip().lower()
         gender_value = raw_gender if raw_gender in ["male", "female", "unisex"] else "unisex"
         set_metafield(variant_gid, "google_shopping", "age_group", "single_line_text_field", "adult")
@@ -416,42 +330,72 @@ def create_shopify_item():
         set_metafield(variant_gid, "google_shopping", "gender", "single_line_text_field", gender_value)
         set_metafield(variant_gid, "google_shopping", "mpn", "single_line_text_field", record.get("SKU", ""))
 
-        # ---------------- 6️⃣ Update Airtable ----------------
-        try:
-            if airtable:
-                airtable.update(record_id, {
-                    "ShopifyID": str(shopify_product_id), 
-                    "Create in Shopify": False
-                })
-                print(f"✅ Airtable updated for record: {record_id}", flush=True)
-        except Exception as e:
-            print(f"⚠️ Airtable update failed: {e}", flush=True)
+        # ---------------- 🆕 6️⃣ Update Regional Prices ----------------
+        print("=" * 80, flush=True)
+        print("STEP 6: Updating regional prices...", flush=True)
+        print("=" * 80, flush=True)
 
-        # ---------------- ✅ Final Success ----------------
+        PRICE_LIST_IDS = {
+            "UAE": "gid://shopify/PriceList/31168201019",
+            "Asia": "gid://shopify/PriceList/31168266555",
+            "America": "gid://shopify/PriceList/31168233787",
+        }
+
+        prices = {
+            "UAE": _to_number(record.get("UAE Price")),
+            "Asia": _to_number(record.get("Asia Price")),
+            "America": _to_number(record.get("America Price")),
+        }
+
+        compare_prices = {
+            "UAE": _to_number(record.get("UAE Comparison Price")),
+            "Asia": _to_number(record.get("Asia Comparison Price")),
+            "America": _to_number(record.get("America Comparison Price")),
+        }
+
+        mutation = """
+        mutation priceListFixedPricesAdd($priceListId: ID!, $prices: [PriceListPriceInput!]!) {
+          priceListFixedPricesAdd(priceListId: $priceListId, prices: $prices) {
+            prices {
+              price { amount currencyCode }
+              compareAtPrice { amount currencyCode }
+              variant { id }
+            }
+            userErrors { field message }
+          }
+        }
+        """
+
+        for region, price_val in prices.items():
+            if not price_val:
+                continue
+            price_list_id = PRICE_LIST_IDS.get(region)
+            compare_val = compare_prices.get(region)
+            currency = "AED"  # adjust if needed
+            price_input = {
+                "variantId": variant_gid,
+                "price": {"amount": str(price_val), "currencyCode": currency},
+            }
+            if compare_val:
+                price_input["compareAtPrice"] = {"amount": str(compare_val), "currencyCode": currency}
+            variables = {"priceListId": price_list_id, "prices": [price_input]}
+            print(f"→ Updating {region} | Price={price_val}", flush=True)
+            res = shopify_graphql(mutation, variables)
+            print(f"✓ {region} price result: {res}", flush=True)
+
+        # ---------------- 7️⃣ Update Airtable ----------------
+        if airtable:
+            airtable.update(record_id, {"ShopifyID": str(shopify_product_id), "Create in Shopify": False})
+            print(f"✅ Airtable updated: {record_id}", flush=True)
+
         return jsonify({
             "success": True,
             "shopify_id": shopify_product_id,
             "variant_id": variant_id,
-            "product_title": product_data["product"]["title"],
-            "images_used": len(image_urls),
-            "inventory_set": qty,
-            "status": status
+            "prices": prices,
+            "inventory": qty
         }), 201
 
     except Exception as e:
         print(f"❌ Unexpected error: {e}", flush=True)
-        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
-
-# Health check endpoint
-@create_shopify_bp.route("/health", methods=["GET"])
-def health_check():
-    """Health check endpoint"""
-    try:
-        validate_environment()
-        return jsonify({
-            "status": "healthy",
-            "shopify_configured": bool(SHOP and TOKEN),
-            "airtable_configured": bool(AIRTABLE_BASE_ID and AIRTABLE_API_KEY)
-        })
-    except Exception as e:
-        return jsonify({"status": "unhealthy", "error": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
