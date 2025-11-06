@@ -102,49 +102,60 @@ class ImageSearcher:
             after_param = f', after: "{cursor}"' if cursor else ""
             query = f"""
             query {{
-              files(first: {limit}{after_param}, query: "filename:{search_pattern} AND media_type:IMAGE") {{
+            files(first: {limit}{after_param}, query: "filename:{search_pattern} AND media_type:IMAGE") {{
                 edges {{
-                  node {{
+                node {{
                     ... on MediaImage {{
-                      id
-                      alt
-                      createdAt
-                      updatedAt
-                      image {{
+                    id
+                    alt
+                    createdAt
+                    updatedAt
+                    image {{
                         id
                         url
                         width
                         height
-                      }}
                     }}
-                  }}
+                    }}
+                }}
                 }}
                 pageInfo {{
-                  hasNextPage
-                  endCursor
+                hasNextPage
+                endCursor
                 }}
-              }}
+            }}
             }}
             """
 
             gql = shopify.GraphQL()
             result = gql.execute(query)
             
+            # FIX: Parse the result if it's a string
+            if isinstance(result, str):
+                import json
+                result = json.loads(result)
+            
             # Check for GraphQL errors
             if "errors" in result:
                 error_msg = result["errors"][0]["message"] if isinstance(result["errors"], list) else str(result["errors"])
+                print(f"⚠️ GraphQL error: {error_msg}", flush=True)
                 return {"success": False, "error": error_msg, "images": []}
                 
             data = result.get("data", {}).get("files", {})
             images = [edge["node"] for edge in data.get("edges", []) if edge.get("node")]
+            
+            print(f"✅ Found {len(images)} images for: {product_name}", flush=True)
             return {"success": True, "images": images, "count": len(images)}
             
         except Exception as e:
             print(f"⚠️ Image search error: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
             return {"success": False, "error": str(e), "images": []}
         finally:
             # Always clear session
             clear_shopify_session()
+
 
 # ---------------------------
 # HELPER FUNCTIONS
