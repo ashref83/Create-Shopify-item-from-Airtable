@@ -92,6 +92,7 @@ class ImageSearcher:
         if not product_name:
             return {"success": False, "error": "Empty product name", "images": []}
 
+        product_name = product_name.replace(" ", "-")
         try:
             if not setup_shopify_session():
                 return {"success": False, "error": "Failed to setup Shopify session", "images": []}
@@ -99,8 +100,7 @@ class ImageSearcher:
             if exact_match:
                 search_pattern = f'"{product_name}"'
             else:
-                words = product_name.lower().split()
-                search_pattern = " OR ".join([f"{w}*" for w in words])
+               search_pattern = f'"{product_name.lower().strip()}*"'
 
             after_param = f', after: "{cursor}"' if cursor else ""
             query = f"""
