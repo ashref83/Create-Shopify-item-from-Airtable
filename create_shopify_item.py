@@ -80,7 +80,7 @@ def validate_environment():
 # ---------------------------
 class ImageSearcher:
     """Class for searching images in Shopify store"""
-   @staticmethod
+    @staticmethod
     def search_by_product_name(
         product_name: str,
         limit: int = 10,
