@@ -80,7 +80,7 @@ def validate_environment():
 # ---------------------------
 class ImageSearcher:
     """Class for searching images in Shopify store"""
-    @staticmethod
+   @staticmethod
     def search_by_product_name(
         product_name: str,
         limit: int = 10,
@@ -95,14 +95,18 @@ class ImageSearcher:
             if not setup_shopify_session():
                 return {"success": False, "error": "Failed to setup Shopify session", "images": []}
 
-            # Replace spaces with underscores to match your filename format
-            product_name_underscore = product_name.replace(" ", "_")
+            # Clean the product name to match Shopify's filename format:
+            # 1. Remove special characters (&, -, etc.)
+            # 2. Replace spaces with underscores
+            import re
+            product_name_clean = re.sub(r'[&\-\']', '', product_name)  # Remove &, -, '
+            product_name_clean = product_name_clean.replace(" ", "_")
             
             if exact_match:
-                search_pattern = f'filename:"{product_name_underscore}"'
+                search_pattern = f'filename:"{product_name_clean}"'
             else:
-                # Use wildcard search with underscores
-                search_pattern = f'filename:"{product_name_underscore}*"'
+                # Use wildcard to catch variations (like filename1, filename2, etc.)
+                search_pattern = f'filename:{product_name_clean}*'
 
             after_param = f', after: "{cursor}"' if cursor else ""
             query = f"""
@@ -132,7 +136,9 @@ class ImageSearcher:
             }}
             """
 
-            print(f"🔍 Search pattern: {search_pattern}", flush=True)
+            print(f"🔍 Original: {product_name}", flush=True)
+            print(f"🔍 Cleaned: {product_name_clean}", flush=True)
+            print(f"🔍 Pattern: {search_pattern}", flush=True)
             
             gql = shopify.GraphQL()
             result = gql.execute(query)
