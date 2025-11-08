@@ -78,83 +78,92 @@ def validate_environment():
 # ---------------------------
 # IMAGE SEARCHER CLASS
 # ---------------------------
-class ImageSearcher:
-    """Class for searching images in Shopify store"""
+@staticmethod
+def search_by_product_name(
+    product_name: str,
+    limit: int = 10,
+    exact_match: bool = False,
+    cursor: Optional[str] = None
+) -> Dict:
+    """Search for images by product name using Shopify Files API"""
+    if not product_name:
+        return {"success": False, "error": "Empty product name", "images": []}
 
-    @staticmethod
-    def search_by_product_name(
-        product_name: str,
-        limit: int = 10,
-        exact_match: bool = False,
-        cursor: Optional[str] = None
-    ) -> Dict:
-        """Search for images by product name using Shopify Files API"""
-        if not product_name:
-            return {"success": False, "error": "Empty product name", "images": []}
+    try:
+        if not setup_shopify_session():
+            return {"success": False, "error": "Failed to setup Shopify session", "images": []}
 
-        product_name = product_name.replace(" ", "_")
-        try:
-            if not setup_shopify_session():
-                return {"success": False, "error": "Failed to setup Shopify session", "images": []}
+        # Extract key words from product name (brand, product type, size)
+        # Remove common words and focus on distinctive terms
+        words = product_name.lower().split()
+        # Filter out common words that won't help matching
+        stop_words = {'ml', 'edp', 'edt', 'perfume', 'cologne', 'unisex', 'men', 'women', 'new', 'sealed', 'box'}
+        key_words = [w for w in words if w not in stop_words and len(w) > 2]
+        
+        # Try multiple search patterns
+        if exact_match:
+            search_pattern = f'"{product_name}"'
+        else:
+            # Search for files containing the key words
+            # This will match regardless of separators (spaces, hyphens, underscores, or none)
+            search_pattern = " AND ".join([f"filename:*{word}*" for word in key_words[:3]])  # Limit to first 3 key words
 
-            if exact_match:
-                search_pattern = f'"{product_name}"'
-            else:
-               search_pattern = f'"{product_name.lower().strip()}*"'
-
-            after_param = f', after: "{cursor}"' if cursor else ""
-            query = f"""
-            query {{
-              files(first: {limit}{after_param}, query: "filename:{search_pattern} AND media_type:IMAGE") {{
-                edges {{
-                  node {{
-                    ... on MediaImage {{
-                      id
-                      alt
-                      createdAt
-                      updatedAt
-                      image {{
-                        id
-                        url
-                        width
-                        height
-                      }}
-                    }}
+        after_param = f', after: "{cursor}"' if cursor else ""
+        query = f"""
+        query {{
+          files(first: {limit}{after_param}, query: "{search_pattern} AND media_type:IMAGE") {{
+            edges {{
+              node {{
+                ... on MediaImage {{
+                  id
+                  alt
+                  createdAt
+                  updatedAt
+                  image {{
+                    id
+                    url
+                    width
+                    height
                   }}
-                }}
-                pageInfo {{
-                  hasNextPage
-                  endCursor
                 }}
               }}
             }}
-            """
+            pageInfo {{
+              hasNextPage
+              endCursor
+            }}
+          }}
+        }}
+        """
 
-            gql = shopify.GraphQL()
-            result = gql.execute(query)
+        print(f"🔍 Search pattern: {search_pattern}", flush=True)
+        
+        gql = shopify.GraphQL()
+        result = gql.execute(query)
 
-            if isinstance(result, str):
-                import json
-                result = json.loads(result)
+        if isinstance(result, str):
+            import json
+            result = json.loads(result)
 
-            if "errors" in result:
-                err_msg = result["errors"][0]["message"] if isinstance(result["errors"], list) else str(result["errors"])
-                print(f"⚠️ GraphQL error: {err_msg}", flush=True)
-                return {"success": False, "error": err_msg, "images": []}
+        if "errors" in result:
+            err_msg = result["errors"][0]["message"] if isinstance(result["errors"], list) else str(result["errors"])
+            print(f"⚠️ GraphQL error: {err_msg}", flush=True)
+            return {"success": False, "error": err_msg, "images": []}
 
-            data = result.get("data", {}).get("files", {})
-            images = [edge["node"] for edge in data.get("edges", []) if edge.get("node")]
-            print(f"✅ Found {len(images)} images for: {product_name}", flush=True)
+        data = result.get("data", {}).get("files", {})
+        images = [edge["node"] for edge in data.get("edges", []) if edge.get("node")]
+        print(f"✅ Found {len(images)} images for: {product_name}", flush=True)
 
-            return {"success": True, "images": images, "count": len(images)}
+        return {"success": True, "images": images, "count": len(images)}
 
-        except Exception as e:
-            print(f"⚠️ Image search error: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
-            return {"success": False, "error": str(e), "images": []}
-        finally:
-            clear_shopify_session()
+    except Exception as e:
+        print(f"⚠️ Image search error: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e), "images": []}
+    finally:
+        clear_shopify_session()
+
 
 
 # ---------------------------
