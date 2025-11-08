@@ -95,20 +95,14 @@ class ImageSearcher:
             if not setup_shopify_session():
                 return {"success": False, "error": "Failed to setup Shopify session", "images": []}
 
-            # Extract key words from product name (brand, product type, size)
-            # Remove common words and focus on distinctive terms
-            words = product_name.lower().split()
-            # Filter out common words that won't help matching
-            stop_words = {'ml', 'edp', 'edt', 'perfume', 'cologne', 'unisex', 'men', 'women', 'new', 'sealed', 'box'}
-            key_words = [w for w in words if w not in stop_words and len(w) > 2]
+            # Replace spaces with underscores to match your filename format
+            product_name_underscore = product_name.replace(" ", "_")
             
-            # Try multiple search patterns
             if exact_match:
-                search_pattern = f'"{product_name}"'
+                search_pattern = f'filename:"{product_name_underscore}"'
             else:
-                # Search for files containing the key words
-                # This will match regardless of separators (spaces, hyphens, underscores, or none)
-                search_pattern = " AND ".join([f"filename:*{word}*" for word in key_words[:3]])  # Limit to first 3 key words
+                # Use wildcard search with underscores
+                search_pattern = f'filename:"{product_name_underscore}*"'
 
             after_param = f', after: "{cursor}"' if cursor else ""
             query = f"""
@@ -165,6 +159,7 @@ class ImageSearcher:
             return {"success": False, "error": str(e), "images": []}
         finally:
             clear_shopify_session()
+
 
 
 
