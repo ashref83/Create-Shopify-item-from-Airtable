@@ -92,7 +92,7 @@ class ImageSearcher:
         if not product_name:
             return {"success": False, "error": "Empty product name", "images": []}
 
-        product_name = product_name.replace(" ", "-")
+        product_name = product_name.replace(" ", "_")
         try:
             if not setup_shopify_session():
                 return {"success": False, "error": "Failed to setup Shopify session", "images": []}
