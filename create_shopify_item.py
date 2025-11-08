@@ -96,11 +96,14 @@ class ImageSearcher:
                 return {"success": False, "error": "Failed to setup Shopify session", "images": []}
 
             # Clean the product name to match Shopify's filename format:
-            # 1. Remove special characters (&, -, etc.)
-            # 2. Replace spaces with underscores
+            # 1. Remove special characters (&, -, ', etc.)
+            # 2. Replace multiple spaces with single space
+            # 3. Replace spaces with underscores
             import re
-            product_name_clean = re.sub(r'[&\-\']', '', product_name)  # Remove &, -, '
-            product_name_clean = product_name_clean.replace(" ", "_")
+            product_name_clean = re.sub(r'[&\-\']', '', product_name)  # Remove special chars
+            product_name_clean = re.sub(r'\s+', ' ', product_name_clean)  # Normalize multiple spaces to single space
+            product_name_clean = product_name_clean.strip()  # Remove leading/trailing spaces
+            product_name_clean = product_name_clean.replace(" ", "_")  # Replace spaces with underscores
             
             if exact_match:
                 search_pattern = f'filename:"{product_name_clean}"'
@@ -165,6 +168,7 @@ class ImageSearcher:
             return {"success": False, "error": str(e), "images": []}
         finally:
             clear_shopify_session()
+
 
 
 
