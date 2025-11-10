@@ -304,75 +304,74 @@ def get_catalog_price_lists():
     CACHED_PRICE_LISTS = price_lists
     return price_lists
 
-def update_price_list_fixed(variant_gid, prices, compare_prices=None):
+def update_price_list_fixed(variant_gid, prices, compare_at_price=None):
     """
-    Updates fixed prices for the given variant across markets.
-    prices: dict like {"UAE": {"amount": 100, "currency": "AED"}, ...}
-    compare_prices: optional dict like {"UAE": 120, ...}
+    Updates fixed prices for the given variant across your known markets.
+    Uses Shopify's priceListFixedPricesAdd mutation.
     """
-    print("=" * 80)
+    print("================================================================================")
     print("STEP 6: UPDATING MARKET PRICES")
-    print("=" * 80)
+    print("================================================================================")
 
+    # ✅ Direct mapping to your known price list IDs
     PRICE_LIST_IDS = {
-        "UAE": "gid://shopify/PriceList/31168201019",
-        "Asia": "gid://shopify/PriceList/31168266555",
-        "America": "gid://shopify/PriceList/31168233787",
+        "UAE": "gid://shopify/PriceList/31168201019",       # United Arab Emirates
+        "Asia": "gid://shopify/PriceList/31168266555",      # Asia Market with 55 rate
+        "America": "gid://shopify/PriceList/31168233787",   # America catalog
     }
-
-    compare_prices = compare_prices or {}
-    price_updates = {}
 
     for market, price_info in prices.items():
         amount = price_info.get("amount")
         currency = price_info.get("currency")
-        
         if not amount or not currency:
-            print(f"⊘ Missing price data for {market}, skipping...")
+            print(f"⊘ Missing price data for {market}, skipping...", flush=True)
             continue
 
         price_list_id = PRICE_LIST_IDS.get(market)
         if not price_list_id:
-            print(f"⊘ No price list ID for {market}, skipping...")
+            print(f"⊘ No price list ID configured for {market}, skipping...", flush=True)
             continue
 
         mutation = """
-        mutation priceListFixedPricesAdd($priceListId: ID!, $prices: [PriceListPriceInput!]!) {
+        mutation priceListFixedPricesAdd(
+          $priceListId: ID!,
+          $prices: [PriceListFixedPriceInput!]!
+        ) {
           priceListFixedPricesAdd(priceListId: $priceListId, prices: $prices) {
             prices {
-              price { amount currencyCode }
-              compareAtPrice { amount currencyCode }
-              variant { id }
+              price {
+                amount
+                currencyCode
+              }
+              variant {
+                id
+              }
             }
-            userErrors { field code message }
+            userErrors {
+              field
+              message
+            }
           }
         }
         """
 
-        price_input = {
-            "variantId": variant_gid,
-            "price": {"amount": str(amount), "currencyCode": currency}
+        variables = {
+            "priceListId": price_list_id,
+            "prices": [
+                {
+                    "variantId": variant_gid,
+                    "price": {
+                        "amount": str(amount),
+                        "currencyCode": currency,
+                    },
+                    "compareAtPrice": {
+                        "amount": str(compare_at_price) if compare_at_price else None,
+                        "currencyCode": currency,
+                    },
+                }
+            ],
         }
-        
-        # Only add compareAtPrice if value exists
-        compare_val = compare_prices.get(market)
-        if compare_val:
-            price_input["compareAtPrice"] = {
-                "amount": str(compare_val),
-                "currencyCode": currency
-            }
 
-        variables = {"priceListId": price_list_id, "prices": [price_input]}
-
-        print(f"→ {market} | Price={amount} {currency} | Compare={compare_val or 'None'}")
+        print(f"→ Updating {market} | PL={price_list_id} | Price={amount} {currency}", flush=True)
         res = shopify_graphql(mutation, variables)
-        price_updates[market] = res
-        
-        if res.get("data", {}).get("priceListFixedPricesAdd", {}).get("userErrors"):
-            print(f"✗ Errors: {res['data']['priceListFixedPricesAdd']['userErrors']}")
-        else:
-            print("✓ Success")
-
-        time.sleep(1)  # Rate limit protection
-
-    return price_updates
+        print("✓ Price update result:", res, flush=True)
