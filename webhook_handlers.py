@@ -46,6 +46,75 @@ def shopify_graphql(query, variables, max_retries=3):
             print(f"✗ Shopify request failed (attempt {attempt+1}): {err}", flush=True)
             time.sleep(2 * (attempt + 1))
     raise Exception("❌ Shopify GraphQL failed after retries")
+#-------------------------------------------------------
+# GET MARKET PRICE LISTS function
+#-------------------------------------------------------
+# ---------- Markets / Price Lists ----------
+def get_market_price_lists():
+    global CACHED_PRICE_LISTS
+    if CACHED_PRICE_LISTS is not None:
+        print("Using cached price lists.", flush=True)
+        return CACHED_PRICE_LISTS
+
+    # Query catalogs directly instead of through markets
+    CATALOG_QUERY = """
+    query ($first: Int!) {
+      catalogs(first: $first, type: MARKET) {
+        nodes {
+          id
+          title
+          status
+          priceList {
+            id
+            name
+            currency
+          }
+        }
+      }
+    }
+    """
+    
+    result = shopify_graphql(CATALOG_QUERY, {"first": 20})
+    if "data" not in result or "catalogs" not in result["data"]:
+        print("ERROR: Could not find data.catalogs in result", flush=True)
+        print("Raw result:", result, flush=True)
+        return {}
+
+    # Map catalog titles to your market keys
+    CATALOG_TO_MARKET = {
+        "United Arab Emirates": "United Arab Emirates",
+        "Asia Market with 55 rate": "Asia Market",
+        "America catlog": "International Market",  # Maps to your "International Market"
+    }
+
+    price_lists = {}
+    print("\nDEBUG: --- Shopify Market Catalogs/PriceLists ---", flush=True)
+    
+    for catalog in result["data"]["catalogs"]["nodes"]:
+        catalog_title = catalog["title"]
+        catalog_status = catalog["status"]
+        
+        print(f"  Catalog: {catalog_title} (ID: {catalog['id']}, Status: {catalog_status})", flush=True)
+        
+        # Only process ACTIVE catalogs
+        if catalog_status != "ACTIVE":
+            print(f"    ⊘ Skipping - not active", flush=True)
+            continue
+        
+        pl = catalog.get("priceList")
+        if pl:
+            print(f"    PriceList: {pl['name']} (ID: {pl['id']}, Currency: {pl['currency']})", flush=True)
+            
+            # Map catalog title to market name
+            market_name = CATALOG_TO_MARKET.get(catalog_title, catalog_title)
+            price_lists[market_name] = {"id": pl["id"], "currency": pl["currency"]}
+        else:
+            print("    ⊘ No price list attached.", flush=True)
+
+    CACHED_PRICE_LISTS = price_lists
+    print("DEBUG: price_lists mapping used for updates:", price_lists, flush=True)
+    return price_lists
+
 
 # -------------------------------------------------------
 #  MAIN HANDLER
@@ -147,48 +216,28 @@ def handle_airtable_webhook():
         # ---- STEP 6: Regional market prices ----
         print("\n" + "=" * 80)
         print("STEP 6: UPDATING MARKET PRICES", flush=True)
-        PRICE_LIST_IDS = {
+        #myedit*/
+        price_lists = get_market_price_lists()
+        print("Price lists:", price_lists, flush=True)
+        #myedit*/
+        """PRICE_LIST_IDS = {
             "UAE": "gid://shopify/PriceList/31168201019",
             "Asia": "gid://shopify/PriceList/31168266555",
             "America": "gid://shopify/PriceList/31168233787",
         }
-
-        price_updates = {}
-        for region, amount in prices.items():
+        """
+        for market_key, amount in prices.items():
             if amount is None:
                 continue
-            price_list_id = PRICE_LIST_IDS.get(region)
-            if not price_list_id:
+            mname = MARKET_NAMES.get(market_key)
+            if not mname or mname not in price_lists:
+                print(f"No price list for market {market_key}", flush=True)
                 continue
-
-            compare_val = compare_prices.get(region)
-            currency = "AED"
-
-            mutation = """
-            mutation priceListFixedPricesAdd($priceListId: ID!, $prices: [PriceListPriceInput!]!) {
-              priceListFixedPricesAdd(priceListId: $priceListId, prices: $prices) {
-                prices { price { amount currencyCode } compareAtPrice { amount currencyCode } variant { id } }
-                userErrors { field code message }
-              }
-            }
-            """
-
-            price_input = {
-                "variantId": variant_gid,
-                "price": {"amount": str(amount), "currencyCode": currency},
-            }
-            if compare_val:
-                price_input["compareAtPrice"] = {"amount": str(compare_val), "currencyCode": currency}
-
-            variables = {"priceListId": price_list_id, "prices": [price_input]}
-
-            print(f"→ Updating {region} | Price={amount} | Compare={compare_val} | {currency}", flush=True)
-            res = shopify_graphql(mutation, variables)
-            price_updates[region] = res
-            print("✓ Price update result:", res, flush=True)
-
-            # small delay to avoid throttle burst
-            time.sleep(1)
+            pl = price_lists[mname]
+            compare_amt = uae_compare_price if market_key == "UAE" and uae_compare_price is not None else None
+            print(f"Updating PL={pl['id']} Market={market_key} price={amount} {pl['currency']} compare_at={compare_amt}", flush=True)
+            res = update_price_list(pl["id"], variant_gid, amount, pl["currency"], compare_at_amount=compare_amt)
+            price_updates[market_key] = res
 
         # ---- FINAL RESPONSE ----
         response_data = {
