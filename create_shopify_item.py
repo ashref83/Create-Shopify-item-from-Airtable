@@ -6,6 +6,60 @@ import shopify
 from typing import List, Dict, Optional
 from shopify_utils import _to_number, shopify_graphql  # 🆕 for price updates
 
+import unicodedata
+import re
+
+def convert_title_to_image_name(product_title):
+    # Normalize Unicode characters
+    product_name_clean = unicodedata.normalize('NFKD', product_title)
+    product_name_clean = product_name_clean.encode('ascii', 'ignore').decode('ascii')
+    
+    # Replace common brand variations first
+    brand_replacements = {
+        "Victor&Rolf": "Viktor_Rolf",
+        "Van Cleef & Arpels": "Van_Cleef_Arpels",
+        "Dolce & Gabbana": "Dolce_Gabbana",
+        "Yves Saint Laurent": "Yves_Saint_Laurent",
+        "Jean Paul Gaultier": "Jean_Paul_Gaultier",
+        "Salvatore Ferragamo": "Salvatore_Ferragamo",
+        "Tonino Lamborghini": "Tonino_Lamborghini"
+    }
+    
+    for old, new in brand_replacements.items():
+        product_name_clean = product_name_clean.replace(old, new)
+    
+    # Handle specific character replacements
+    product_name_clean = product_name_clean.replace("'", "_")  # Handle apostrophes
+    product_name_clean = product_name_clean.replace("â€™", "_")  # Handle curly apostrophes
+    product_name_clean = product_name_clean.replace("Ãª", "e")  # Handle encoding issues
+    product_name_clean = product_name_clean.replace("Ã©", "e")
+    product_name_clean = product_name_clean.replace("&", "and")  # Replace & with 'and'
+    
+    # Add underscore between letters and numbers (both directions)
+    product_name_clean = re.sub(r'([A-Za-z])(\d)', r'\1_\2', product_name_clean)  # letter then number
+    product_name_clean = re.sub(r'(\d)([A-Za-z])', r'\1_\2', product_name_clean)  # number then letter
+    
+    # Add underscore between different case letters (camelCase to snake_case)
+    product_name_clean = re.sub(r'([a-z])([A-Z])', r'\1_\2', product_name_clean)
+    
+    # Remove or replace problematic characters but keep some
+    product_name_clean = re.sub(r'[®™°º"+]+', '', product_name_clean)  # Remove specific symbols
+    product_name_clean = re.sub(r'[.,:/()\-]', ' ', product_name_clean)  # Replace these with spaces
+    
+    # Normalize spaces and convert to underscores
+    product_name_clean = re.sub(r'\s+', ' ', product_name_clean).strip()
+    product_name_clean = product_name_clean.replace(" ", "_")
+    
+    # Handle multiple consecutive underscores
+    product_name_clean = re.sub(r'_+', '_', product_name_clean)
+    
+    # Ensure it starts with a letter and remove trailing underscores
+    product_name_clean = re.sub(r'^[^A-Za]*', '', product_name_clean)
+    product_name_clean = product_name_clean.strip('_')
+    
+    return product_name_clean
+
+
 create_shopify_bp = Blueprint("create_shopify_bp", __name__)
 
 # ---------------------------
@@ -99,6 +153,7 @@ class ImageSearcher:
             # 1. Remove special characters (&, -, ', etc.)
             # 2. Replace multiple spaces with single space
             # 3. Replace spaces with underscores
+            """
             import re
             import unicodedata
 
@@ -108,9 +163,12 @@ class ImageSearcher:
             product_name_clean = re.sub(r'[&\-\'"®™°º.,:/()]+', '', product_name_clean)  # remove special symbols
             product_name_clean = re.sub(r'\s+', ' ', product_name_clean)  # normalize multiple spaces
             product_name_clean = product_name_clean.strip()
+            product_name_clean = re.sub(r'([A-Za-z])(\d)', r'\1_\2', product_name_clean)  # add underscore between letters and digits
             product_name_clean = product_name_clean.replace(" ", "_")  # replace spaces with underscores
 
-            
+            """
+
+            product_name_clean = convert_title_to_image_name(product_name)
             if exact_match:
                 search_pattern = f'filename:"{product_name_clean}"'
             else:
