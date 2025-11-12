@@ -100,10 +100,16 @@ class ImageSearcher:
             # 2. Replace multiple spaces with single space
             # 3. Replace spaces with underscores
             import re
-            product_name_clean = re.sub(r'[&\-\']', '', product_name)  # Remove special chars
-            product_name_clean = re.sub(r'\s+', ' ', product_name_clean)  # Normalize multiple spaces to single space
-            product_name_clean = product_name_clean.strip()  # Remove leading/trailing spaces
-            product_name_clean = product_name_clean.replace(" ", "_")  # Replace spaces with underscores
+            import unicodedata
+
+            # Normalize and clean product name for filename-safe pattern
+            product_name_clean = unicodedata.normalize('NFKD', product_name)
+            product_name_clean = product_name_clean.encode('ascii', 'ignore').decode('ascii')  # remove non-ASCII like °, é, etc.
+            product_name_clean = re.sub(r'[&\-\'"®™°º.,:/()]+', '', product_name_clean)  # remove special symbols
+            product_name_clean = re.sub(r'\s+', ' ', product_name_clean)  # normalize multiple spaces
+            product_name_clean = product_name_clean.strip()
+            product_name_clean = product_name_clean.replace(" ", "_")  # replace spaces with underscores
+
             
             if exact_match:
                 search_pattern = f'filename:"{product_name_clean}"'
