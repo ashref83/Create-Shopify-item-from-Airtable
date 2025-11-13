@@ -345,6 +345,7 @@ def create_shopify_item():
                 "product_type": record.get("Type", ""),
                 "tags": record.get("Category", ""),
                 "status": status,
+                "category": "Health & Beauty > Personal Care > Cosmetics > Perfumes & Colognes", 
                 "variants": [{
                     "sku": record.get("SKU", ""),
                     "price": str(_to_number(record.get("UAE Price", 0))),
