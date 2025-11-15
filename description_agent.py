@@ -10,6 +10,17 @@ import os
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+# ---------- OpenAI Safe Call with Timeout + Retries ----------
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((RateLimitError, APIError))
+)
+def safe_openai_call(**kwargs):
+    """Wrapper for OpenAI calls with extended timeout."""
+    return client.chat.completions.create(timeout=90, **kwargs)
+
+
 load_dotenv(override=True)
 
 client = OpenAI()
@@ -37,7 +48,7 @@ def fetch_notes_with_fallback(perfume_name: str, brand_name: Optional[str] = Non
         return empty_result()
 
     # Try sonar first (cheaper)
-    sonar_result = _fetch_with_perplexity(perfume_name, brand_name, "sonar", api_key)
+    sonar_result = _fetch_with_perplexity(perfume_name, brand_name, "sonar", api_key,timeout=45)
     
     if _has_meaningful_notes(sonar_result) and _has_reliable_sources(sonar_result):
         return sonar_result
@@ -292,7 +303,7 @@ def generate_description_from_web(
         "sources": research.get("sources", [])
     }
 
-    creator_response = client.chat.completions.create(
+    creator_response = safe_openai_call(
         model=model,
         messages=[
             {"role": "system", "content": CREATOR_SYSTEM_PROMPT},
@@ -306,7 +317,7 @@ def generate_description_from_web(
 
     # 3) Validator: check and correct
     try:
-        validator_response = client.chat.completions.create(
+        validator_response = safe_openai_call(
             model=model,
             messages=[
                 {"role": "system", "content": VALIDATOR_SYSTEM_PROMPT},
